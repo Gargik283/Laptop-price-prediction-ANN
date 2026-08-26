@@ -4,7 +4,7 @@ A Deep Learning project that uses an Artificial Neural Network (ANN) to predict 
 
 ## 🚀 Live Demo
 
-[Open the Streamlit App]([https://laptop-price-prediction-ann-3n2img7urzrc78xjyivgj4.streamlit.app/]
+[Open the Streamlit App][https://laptop-price-prediction-ann-3n2img7urzrc78xjyivgj4.streamlit.app/]
 
 ## 📌 Project Overview
 
