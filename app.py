@@ -1,177 +1,615 @@
 import os
-import sys
 
-# Suppress background TensorFlow logs and startup text strings
+# Suppress TensorFlow startup messages
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-import streamlit as st
-import pandas as pd
-import numpy as np
 import pickle
+import numpy as np
+import pandas as pd
+import streamlit as st
 import tensorflow as tf
 
+
 # ============================================================
-# PAGE ARCHITECTURE CONFIGURATION
+# PAGE CONFIGURATION
 # ============================================================
+
 st.set_page_config(
-    page_title="Laptop Price Predictor ANN",
+    page_title="Laptop Price Predictor",
     page_icon="💻",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom css style mapping for layout presentation visibility
-st.markdown("""
-<style>
-    [data-testid="stMetricValue"] { font-size: 2.25rem !important; font-weight: 700; color: #1E88E5; }
-</style>
-""", unsafe_allow_html=True)
+
+# ============================================================
+# FILE PATHS
+# ============================================================
+
+MODEL_FILE = "laptop_price_model.keras"
+SCALER_FILE = "scaler.pkl"
+FEATURE_COLUMNS_FILE = "feature_columns.pkl"
+DATASET_FILE = "laptop_price.csv"
 
 
 # ============================================================
-# RUNTIME ASSET VERIFICATION LOGIC (Diagnostic Overlay)
+# FEATURES
+# Based on the training notebook
 # ============================================================
-required_assets = ["laptop_price_model.keras", "scaler.pkl", "feature_columns.pkl", "laptop_price.csv"]
-missing_assets = []
 
-# Scan directory structures to evaluate physical presence
-for asset in required_assets:
-    # Check current directory and subdirectories for case-insensitive matches
-    found = False
-    for root, dirs, files in os.walk("."):
-        for f in files:
-            if f.lower() == asset.lower():
-                found = True
-                # Correct the internal naming reference mapping if path is relative
-                actual_path = os.path.join(root, f).replace(".\\", "").replace("./", "")
-                if asset == "laptop_price_model.keras": model_path = actual_path
-                elif asset == "scaler.pkl": scaler_path = actual_path
-                elif asset == "feature_columns.pkl": feature_columns_path = actual_path
-                elif asset == "laptop_price.csv": dataset_path = actual_path
-                break
-    if not found:
-        missing_assets.append(asset)
+CATEGORICAL_FEATURES = [
+    "Company",
+    "TypeName",
+    "ScreenResolution",
+    "Cpu",
+    "Memory",
+    "Gpu",
+    "OpSys"
+]
 
-# Intercept broken layouts before execution fails
-if missing_assets:
-    st.error("🚨 Critical Error: Missing Machine Learning Pipeline Files")
-    st.write(f"The cloud container scanned the server storage path `{os.getcwd()}` but cannot locate these necessary assets:")
-    for missing in missing_assets:
-        st.markdown(f"* **`{missing}`**")
-    
-    st.info("💡 **How to Fix:** Ensure these exact files are uploaded directly alongside your code in your root repository.")
+NUMERICAL_FEATURES = [
+    "Inches",
+    "Ram",
+    "Weight"
+]
+
+
+# ============================================================
+# CHECK REQUIRED FILES
+# ============================================================
+
+required_files = [
+    MODEL_FILE,
+    SCALER_FILE,
+    FEATURE_COLUMNS_FILE,
+    DATASET_FILE
+]
+
+missing_files = [
+    file for file in required_files
+    if not os.path.exists(file)
+]
+
+if missing_files:
+
+    st.error("❌ Required project files are missing.")
+
+    st.write("Please make sure these files are in the same folder as `app.py`:")
+
+    for file in missing_files:
+        st.code(file)
+
     st.stop()
 
 
 # ============================================================
-# RESOURCE CACHING & DATA PIPELINE LOADING
+# LOAD MODEL
 # ============================================================
+
 @st.cache_resource
-def load_ml_assets(m_p, s_p, f_p):
-    """Loads and caches the compiled deep learning assets dynamically using tracked file paths."""
-    model = tf.keras.models.load_model(m_p)
-    with open(s_p, "rb") as f: scaler = pickle.load(f)
-    with open(f_p, "rb") as f: feature_columns = pickle.load(f)
+def load_model_assets():
+
+    model = tf.keras.models.load_model(
+        MODEL_FILE
+    )
+
+    with open(SCALER_FILE, "rb") as file:
+        scaler = pickle.load(file)
+
+    with open(FEATURE_COLUMNS_FILE, "rb") as file:
+        feature_columns = pickle.load(file)
+
     return model, scaler, feature_columns
 
+
+# ============================================================
+# LOAD DATASET
+# ============================================================
+
 @st.cache_data
-def load_clean_dataset(d_p):
-    """Loads dataset and strips away unexpected structural noise elements."""
-    try:
-        raw_df = pd.read_csv(d_p, encoding="latin-1")
-        if 'laptop_ID' in raw_df.columns:
-            corrupted = raw_df['laptop_ID'].astype(str).str.contains('<<<<<<<|=======|>>>>>>>')
-            return raw_df[~corrupted].copy()
-        return raw_df
-    except:
-        # Emergency array fallbacks if storage streaming is interrupted
-        return pd.DataFrame({
-            "Company": ["Acer", "Apple", "Asus", "Dell", "HP", "Lenovo", "MSI"],
-            "TypeName": ["Notebook", "Ultrabook", "Gaming", "2 in 1 Convertible", "Workstation"],
-            "ScreenResolution": ["Full HD 1920x1080", "1366x768"],
-            "Cpu": ["Intel Core i5 7200U 2.5GHz"], "Memory": ["256GB SSD", "512GB SSD"],
-            "Gpu": ["Intel HD Graphics 620"], "OpSys": ["Windows 10", "macOS", "Linux"]
-        })
+def load_dataset():
 
-# Instantiate pipeline layers safely using our verified paths
-model, scaler, feature_columns = load_ml_assets(model_path, scaler_path, feature_columns_path)
-df = load_clean_dataset(dataset_path)
-
-CATEGORICAL_COLUMNS = ["Company", "TypeName", "ScreenResolution", "Cpu", "Memory", "Gpu", "OpSys"]
-NUMERICAL_COLUMNS = ["Inches", "Ram", "Weight"]
-
-def extract_dropdown_options(column_name, fallback_list):
-    if df is not None and column_name in df.columns:
-        options = df[column_name].dropna().astype(str).unique().tolist()
-        options.sort()
-        return options
-    return fallback_list
+    return pd.read_csv(
+        DATASET_FILE,
+        encoding="latin-1"
+    )
 
 
 # ============================================================
-# USER INTERFACE RENDERING
+# LOAD RESOURCES
 # ============================================================
+
+try:
+
+    model, scaler, feature_columns = load_model_assets()
+    df = load_dataset()
+
+except Exception as error:
+
+    st.error("❌ Unable to load the trained model or preprocessing files.")
+
+    st.exception(error)
+
+    st.stop()
+
+
+# ============================================================
+# HELPER FUNCTION
+# ============================================================
+
+def get_options(column_name, fallback_values):
+
+    if column_name in df.columns:
+
+        values = (
+            df[column_name]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
+        values.sort()
+
+        if values:
+            return values
+
+    return fallback_values
+
+
+# ============================================================
+# SIDEBAR
+# ============================================================
+
 with st.sidebar:
-    st.title("💻 Architecture Summary")
-    st.markdown("""
-    ### Model Topology
-    * **Type:** Artificial Neural Network (ANN)
-    * **Task:** Continuous Price Mappings
-    * **Input Vector Matrix:** 337 Features
-    """)
 
-st.title("💻 Laptop Price Prediction via Deep Learning")
-st.write("Specify configuration parameters below to generate evaluations via the underlying Neural Network grid.")
-st.divider()
+    st.title("💻 Laptop Price Predictor")
 
-st.subheader("📋 Step 1: Core System Dimensions")
-metric_grid1, metric_grid2, metric_grid3 = st.columns(3)
-with metric_grid1: user_inches = st.number_input("📏 Screen Dimension (Inches)", 10.0, 25.0, 15.6, 0.1)
-with metric_grid2: user_ram = st.number_input("🧠 System RAM Configuration (GB)", 2, 64, 8, 2)
-with metric_grid3: user_weight = st.number_input("⚖️ Machine Weight (kg)", 0.5, 6.0, 2.0, 0.1)
+    st.caption(
+        "Deep Learning Regression Application"
+    )
 
-st.divider()
-st.subheader("⚙️ Step 2: Component Specifications")
-ui_col1, ui_col2 = st.columns(2)
-with ui_col1:
-    user_company = st.selectbox("Company", extract_dropdown_options("Company", ["Apple", "HP", "Dell"]))
-    user_resolution = st.selectbox("Resolution Matrix", extract_dropdown_options("ScreenResolution", ["Full HD 1920x1080"]))
-    user_cpu = st.selectbox("Processor (CPU)", extract_dropdown_options("Cpu", ["Intel Core i5 7200U 2.5GHz"]))
-with ui_col2:
-    user_typename = st.selectbox("Classification (TypeName)", extract_dropdown_options("TypeName", ["Notebook", "Ultrabook"]))
-    user_opsys = st.selectbox("Operating System (OpSys)", extract_dropdown_options("OpSys", ["Windows 10", "macOS"]))
-    user_memory = st.selectbox("Storage Module (Memory)", extract_dropdown_options("Memory", ["256GB SSD"]))
+    st.divider()
 
-user_gpu = st.selectbox("Graphics Card (GPU)", extract_dropdown_options("Gpu", ["Intel HD Graphics 620"]))
+    st.subheader("🧠 Model Information")
+
+    st.write("**Approach:** Deep Learning")
+    st.write("**Architecture:** Artificial Neural Network")
+    st.write("**Task:** Regression")
+    st.write("**Target:** Price_euros")
+    st.write(
+        f"**Encoded Inputs:** {len(feature_columns)}"
+    )
+    st.write("**Trainable Parameters:** 70,145")
+
+    st.divider()
+
+    st.subheader("🛠️ Technologies")
+
+    st.write(
+        """
+        • Python  
+        • Pandas  
+        • NumPy  
+        • Scikit-learn  
+        • TensorFlow  
+        • Keras  
+        • Streamlit
+        """
+    )
+
+    st.divider()
+
+    st.subheader("📊 Model Performance")
+
+    st.write("**R²:** 0.8428")
+    st.write("**MAE:** €186.09")
+
+    st.divider()
+
+    st.caption(
+        "End-to-end Deep Learning project: "
+        "preprocessing → ANN training → deployment"
+    )
 
 
 # ============================================================
-# DEEP LEARNING INFERENCE RUNTIME
+# MAIN HEADER
 # ============================================================
-st.divider()
-trigger_inference = st.button("🔮 Calculate Estimated Valuation", type="primary", use_container_width=True)
 
-if trigger_inference:
+st.title("💻 Laptop Price Predictor")
+
+st.write(
+    "Predict the estimated price of a laptop from "
+    "its hardware and software specifications."
+)
+
+st.divider()
+
+
+# ============================================================
+# PROJECT OVERVIEW
+# ============================================================
+
+overview_col1, overview_col2, overview_col3 = st.columns(3)
+
+with overview_col1:
+
+    st.metric(
+        "Model",
+        "ANN"
+    )
+
+with overview_col2:
+
+    st.metric(
+        "Task",
+        "Regression"
+    )
+
+with overview_col3:
+
+    st.metric(
+        "R² Score",
+        "0.8428"
+    )
+
+
+st.divider()
+
+
+# ============================================================
+# LAPTOP SPECIFICATIONS
+# ============================================================
+
+st.subheader("📋 Laptop Specifications")
+
+st.caption(
+    "Select the laptop configuration below and generate "
+    "a price prediction."
+)
+
+
+# ============================================================
+# DROPDOWN OPTIONS
+# ============================================================
+
+company_options = get_options(
+    "Company",
+    [
+        "Acer",
+        "Apple",
+        "Asus",
+        "Dell",
+        "HP",
+        "Lenovo"
+    ]
+)
+
+type_options = get_options(
+    "TypeName",
+    [
+        "Notebook",
+        "Ultrabook",
+        "Gaming",
+        "2 in 1 Convertible",
+        "Workstation",
+        "Netbook"
+    ]
+)
+
+resolution_options = get_options(
+    "ScreenResolution",
+    [
+        "Full HD 1920x1080",
+        "1366x768"
+    ]
+)
+
+cpu_options = get_options(
+    "Cpu",
+    [
+        "Intel Core i5 7200U 2.5GHz"
+    ]
+)
+
+memory_options = get_options(
+    "Memory",
+    [
+        "256GB SSD",
+        "512GB SSD",
+        "1TB HDD"
+    ]
+)
+
+gpu_options = get_options(
+    "Gpu",
+    [
+        "Intel HD Graphics 620"
+    ]
+)
+
+os_options = get_options(
+    "OpSys",
+    [
+        "Windows 10",
+        "Windows 7",
+        "Linux",
+        "macOS"
+    ]
+)
+
+
+# ============================================================
+# NUMERICAL INPUTS
+# ============================================================
+
+st.markdown("### ⚙️ Core Specifications")
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+
+    user_inches = st.number_input(
+        "📏 Screen Size (Inches)",
+        min_value=10.1,
+        max_value=18.4,
+        value=15.6,
+        step=0.1
+    )
+
+with col2:
+
+    user_ram = st.number_input(
+        "🧠 RAM (GB)",
+        min_value=2,
+        max_value=64,
+        value=8,
+        step=2
+    )
+
+with col3:
+
+    user_weight = st.number_input(
+        "⚖️ Weight (kg)",
+        min_value=0.5,
+        max_value=6.0,
+        value=2.0,
+        step=0.1
+    )
+
+
+# ============================================================
+# CATEGORICAL INPUTS
+# ============================================================
+
+st.markdown("### 🧩 Hardware & Software")
+
+col1, col2 = st.columns(2)
+
+with col1:
+
+    user_company = st.selectbox(
+        "🏢 Company",
+        company_options
+    )
+
+    user_typename = st.selectbox(
+        "💼 Laptop Type",
+        type_options
+    )
+
+    user_cpu = st.selectbox(
+        "⚙️ Processor (CPU)",
+        cpu_options
+    )
+
+    user_gpu = st.selectbox(
+        "🎮 Graphics Card (GPU)",
+        gpu_options
+    )
+
+with col2:
+
+    user_resolution = st.selectbox(
+        "🖥️ Screen Resolution",
+        resolution_options
+    )
+
+    user_memory = st.selectbox(
+        "💾 Memory / Storage",
+        memory_options
+    )
+
+    user_opsys = st.selectbox(
+        "🪟 Operating System",
+        os_options
+    )
+
+
+# ============================================================
+# PREDICTION BUTTON
+# ============================================================
+
+st.divider()
+
+predict_button = st.button(
+    "🔮 Predict Laptop Price",
+    type="primary",
+    use_container_width=True
+)
+
+
+# ============================================================
+# PREDICTION
+# ============================================================
+
+if predict_button:
+
     try:
-        raw_input_row = pd.DataFrame({
-            "Company": [user_company], "TypeName": [user_typename], "Inches": [user_inches],
-            "ScreenResolution": [user_resolution], "Cpu": [user_cpu], "Ram": [user_ram],
-            "Memory": [user_memory], "Gpu": [user_gpu], "OpSys": [user_opsys], "Weight": [user_weight]
+
+        # ----------------------------------------------------
+        # CREATE RAW INPUT
+        # ----------------------------------------------------
+
+        input_data = pd.DataFrame({
+
+            "Company": [user_company],
+
+            "TypeName": [user_typename],
+
+            "Inches": [user_inches],
+
+            "ScreenResolution": [user_resolution],
+
+            "Cpu": [user_cpu],
+
+            "Ram": [user_ram],
+
+            "Memory": [user_memory],
+
+            "Gpu": [user_gpu],
+
+            "OpSys": [user_opsys],
+
+            "Weight": [user_weight]
+
         })
 
-        processed_row = pd.get_dummies(raw_input_row, columns=CATEGORICAL_COLUMNS, drop_first=True)
-        aligned_features = processed_row.reindex(columns=feature_columns, fill_value=0)
-        aligned_features[NUMERICAL_COLUMNS] = scaler.transform(aligned_features[NUMERICAL_COLUMNS])
-        
-        network_vector = aligned_features.astype(np.float32).to_numpy()
-        predicted_tensor = model.predict(network_vector, verbose=0)
-        final_euros_value = max(0.0, float(predicted_tensor.flatten()[0]))
 
-        st.success("🎉 Neural Network Estimation Completed Successfully!")
-        display_col1, display_col2 = st.columns(2)
-        with display_col1: st.metric(label="Predicted Valuation (Euros)", value=f"€{final_euros_value:,.2f}")
-        with display_col2: st.metric(label="Approximate Valuation (INR)", value=f"₹{final_euros_value * 91.5:,.2f}")
+        # ----------------------------------------------------
+        # ONE-HOT ENCODING
+        # Same categorical columns used during training
+        # ----------------------------------------------------
 
-    except Exception as error_exception:
-        st.error("🚨 Inference Evaluation Failure.")
-        st.exception(error_exception)
+        encoded_data = pd.get_dummies(
+            input_data,
+            columns=CATEGORICAL_FEATURES,
+            drop_first=True
+        )
+
+
+        # ----------------------------------------------------
+        # ALIGN WITH TRAINING FEATURE ORDER
+        # ----------------------------------------------------
+
+        encoded_data = encoded_data.reindex(
+            columns=feature_columns,
+            fill_value=0
+        )
+
+
+        # ----------------------------------------------------
+        # SCALE NUMERICAL FEATURES
+        # Same features standardized during training
+        # ----------------------------------------------------
+
+        encoded_data[NUMERICAL_FEATURES] = scaler.transform(
+            encoded_data[NUMERICAL_FEATURES]
+        )
+
+
+        # ----------------------------------------------------
+        # MODEL INPUT
+        # ----------------------------------------------------
+
+        model_input = (
+            encoded_data
+            .astype(np.float32)
+            .to_numpy()
+        )
+
+
+        # ----------------------------------------------------
+        # PREDICTION
+        # ----------------------------------------------------
+
+        prediction = model.predict(
+            model_input,
+            verbose=0
+        )
+
+        predicted_price = max(
+            0.0,
+            float(np.asarray(prediction).flatten()[0])
+        )
+
+
+        # ----------------------------------------------------
+        # RESULT
+        # ----------------------------------------------------
+
+        st.success(
+            "✅ Price prediction generated successfully!"
+        )
+
+        st.subheader("💰 Estimated Laptop Price")
+
+        st.metric(
+            label="Predicted Price",
+            value=f"€{predicted_price:,.2f}"
+        )
+
+
+        # ----------------------------------------------------
+        # SPECIFICATION SUMMARY
+        # ----------------------------------------------------
+
+        st.subheader("📊 Selected Specifications")
+
+        summary = pd.DataFrame({
+
+            "Specification": [
+                "Company",
+                "Laptop Type",
+                "Screen Size",
+                "Screen Resolution",
+                "CPU",
+                "RAM",
+                "Memory",
+                "GPU",
+                "Operating System",
+                "Weight"
+            ],
+
+            "Selected Value": [
+                user_company,
+                user_typename,
+                f"{user_inches} inches",
+                user_resolution,
+                user_cpu,
+                f"{user_ram} GB",
+                user_memory,
+                user_gpu,
+                user_opsys,
+                f"{user_weight} kg"
+            ]
+
+        })
+
+        st.dataframe(
+            summary,
+            use_container_width=True,
+            hide_index=True
+        )
+
+
+    except Exception as error:
+
+        st.error(
+            "❌ Prediction failed."
+        )
+
+        st.exception(error)
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
+st.divider()
+
+st.caption(
+    "Laptop Price Prediction • Deep Learning • "
+    "Artificial Neural Network • TensorFlow / Keras • Streamlit"
+)
