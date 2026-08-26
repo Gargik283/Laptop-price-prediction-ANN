@@ -165,7 +165,7 @@ if trigger_inference:
         
         network_vector = aligned_features.astype(np.float32).to_numpy()
         predicted_tensor = model.predict(network_vector, verbose=0)
-        final_euros_value = max(0.0, float(predicted_tensor.flatten()))
+        final_euros_value = max(0.0, float(predicted_tensor.flatten()[0]))
 
         st.success("🎉 Neural Network Estimation Completed Successfully!")
         display_col1, display_col2 = st.columns(2)
