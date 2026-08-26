@@ -120,7 +120,7 @@ laptop-price-prediction/
 ### 1. Clone the repository
 
 ```bash
-git clone [YOUR_GITHUB_REPOSITORY_URL](https://github.com/Gargik283/Laptop-price-prediction-ANN)
+git clone [https://github.com/Gargik283/Laptop-price-prediction-ANN]
 cd laptop-price-prediction
 ```
 
